@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeerSpace — P2P Video Calls</title>
+
+  <!-- Fonts: Space Grotesk display + JetBrains Mono for codes -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Noise texture overlay -->
+  <div class="noise" aria-hidden="true"></div>
+
+  <!-- Grid lines bg -->
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <div class="app">
+
+    <!-- ── Header ── -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-mark">
+          <span class="logo-dot"></span>
+          <span class="logo-dot"></span>
+          <span class="logo-dot"></span>
+          <span class="logo-dot"></span>
+        </div>
+        <span class="logo-name">PeerSpace</span>
+      </div>
+      <div class="header-right">
+        <span class="badge" id="connectionBadge">● Offline</span>
+      </div>
+    </header>
+
+    <!-- ── Main content ── -->
+    <main class="main">
+
+      <!-- Left: Controls -->
+      <aside class="sidebar">
+
+        <div class="card">
+          <div class="card-header">
+            <h1 class="card-title">Start a call</h1>
+            <p class="card-desc">No account needed. Just a room ID.</p>
+          </div>
+
+          <!-- Media mode selector -->
+          <div class="mode-selector" id="modeSelector">
+            <button class="mode-btn active" data-mode="camera" id="modeCamera">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              Camera
+            </button>
+            <button class="mode-btn" data-mode="screen" id="modeScreen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              Screen
+            </button>
+            <button class="mode-btn" data-mode="none" id="modeNone">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>
+              No Cam
+            </button>
+          </div>
+
+          <!-- Room ID input -->
+          <div class="field">
+            <label class="field-label" for="roomIdInput">ROOM ID</label>
+            <div class="field-row">
+              <input
+                type="text"
+                id="roomIdInput"
+                class="field-input"
+                placeholder="e.g. lunar-fox-42"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button class="icon-btn" id="copyBtn" title="Copy" style="display:none" aria-label="Copy room ID">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="actions">
+            <button class="btn btn-create" id="createBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Create Room
+            </button>
+            <button class="btn btn-join" id="joinBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+              Join Room
+            </button>
+          </div>
+
+          <!-- Status -->
+          <div class="status" id="statusBar">
+            <span class="status-dot idle" id="statusDot"></span>
+            <span class="status-msg" id="statusText">Ready</span>
+          </div>
+        </div>
+
+        <!-- Controls bar (shown when in call) -->
+        <div class="call-controls" id="callControls" style="display:none">
+          <button class="ctrl-btn" id="muteBtn" title="Mute mic">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <span>Mute</span>
+          </button>
+          <button class="ctrl-btn" id="videoBtn" title="Toggle video">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            <span>Video</span>
+          </button>
+          <button class="ctrl-btn ctrl-btn--danger" id="hangupBtn" title="Leave call">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.42 19.42 0 0 1 4.43 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.34 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.32 9.82"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
+            <span>Hang Up</span>
+          </button>
+        </div>
+
+      </aside>
+
+      <!-- Right: Video -->
+      <section class="stage">
+
+        <!-- Remote video (large) -->
+        <div class="video-wrap video-wrap--remote" id="remoteWrap">
+          <div class="video-empty" id="remotePlaceholder">
+            <div class="empty-avatar">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <p class="empty-label">Waiting for peer to join…</p>
+            <p class="empty-sub">Share your Room ID to connect</p>
+          </div>
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="video-chip">Remote</div>
+        </div>
+
+        <!-- Local video (small PIP) -->
+        <div class="video-wrap video-wrap--local" id="localWrap">
+          <div class="video-empty" id="localPlaceholder">
+            <div class="empty-avatar small">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+          </div>
+          <video id="localVideo" autoplay playsinline muted></video>
+          <div class="video-chip">You</div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span class="mono">WebRTC · P2P · End-to-end · No server relay</span>
+      <span class="mono">ritikvidcall.netlify.app</span>
+    </footer>
+
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Socket.IO (served by Node backend) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
