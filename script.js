@@ -2,14 +2,11 @@
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PeerSpace — script.js
-   Signaling server: deployed on Render, connected via Socket.IO.
-   Supports three media modes: camera, screen share, or no video (audio only
-   or completely silent — so the call works even if media is refused).
+   Signaling server: https://vidcall-lh27.onrender.com
+   Supports 3 media modes: camera | screen | no-cam (call works regardless)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// ── IMPORTANT: Replace this with your Render backend URL once deployed ──────
-// While testing locally, keep it as empty string — io() auto-connects to localhost
-const SIGNAL_SERVER = '';   // e.g. 'https://your-app.onrender.com'
+const SIGNAL_SERVER = 'https://vidcall-lh27.onrender.com';
 
 /* ── DOM ──────────────────────────────────────────────────────────────────── */
 const roomIdInput       = document.getElementById('roomIdInput');
@@ -42,9 +39,9 @@ const RTC_CONFIG = {
 /* ── State ────────────────────────────────────────────────────────────────── */
 let socket        = null;
 let peerConn      = null;
-let localStream   = null;   // null when mode === 'none'
+let localStream   = null;
 let currentRoomId = null;
-let mediaMode     = 'camera';  // 'camera' | 'screen' | 'none'
+let mediaMode     = 'camera';   // 'camera' | 'screen' | 'none'
 let isMuted       = false;
 let isVideoOff    = false;
 
@@ -78,13 +75,16 @@ function deactivateVideo(videoEl, placeholder) {
 function generateRoomId() {
   const adj  = ['lunar','neon','cobalt','amber','onyx','cipher','void','stark'];
   const noun = ['fox','hawk','wolf','lynx','raven','pulse','node','ghost'];
-  return `${adj[Math.random()*adj.length|0]}-${noun[Math.random()*noun.length|0]}-${Math.floor(Math.random()*90)+10}`;
+  return `${adj[Math.random() * adj.length | 0]}-${noun[Math.random() * noun.length | 0]}-${Math.floor(Math.random() * 90) + 10}`;
 }
 
 function setBadge(online) {
   connectionBadge.textContent = online ? '● Online' : '● Offline';
   connectionBadge.classList.toggle('online', online);
 }
+
+function disableButtons() { createBtn.disabled = true;  joinBtn.disabled = true;  }
+function enableButtons()  { createBtn.disabled = false; joinBtn.disabled = false; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MEDIA MODE SELECTOR
@@ -100,41 +100,40 @@ modeBtns.forEach(btn => {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MEDIA — get local stream based on selected mode
+   The call ALWAYS proceeds even if media fails — we return an empty
+   MediaStream() as fallback so WebRTC still connects.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 async function getLocalMedia() {
-  // ── Mode: No Camera — skip media entirely ─────────────────────────────────
+
+  // ── No Cam mode ────────────────────────────────────────────────────────────
   if (mediaMode === 'none') {
-    setStatus('Joining without camera/mic', 'waiting');
-    showToast('📵 Joining without media');
-    // Return a silent empty MediaStream so WebRTC still works
+    showToast('📵 Joining without camera');
+    setStatus('No media — joining anyway', 'waiting');
     return new MediaStream();
   }
 
-  // ── Mode: Screen share ────────────────────────────────────────────────────
+  // ── Screen share mode ──────────────────────────────────────────────────────
   if (mediaMode === 'screen') {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       localVideo.srcObject = stream;
       activateVideo(localVideo, localPlaceholder);
       showToast('🖥️ Screen share active');
-      // If the user stops sharing via the browser's built-in button
       stream.getVideoTracks()[0].onended = () => {
-        showToast('Screen share ended');
         deactivateVideo(localVideo, localPlaceholder);
+        showToast('Screen share stopped');
       };
       return stream;
     } catch (err) {
-      if (err.name === 'NotAllowedError') {
-        showToast('Screen share cancelled — joining without video');
-        return new MediaStream();
-      }
-      throw err;
+      // User cancelled or denied — still join the call
+      showToast('Screen share cancelled — joining without video');
+      return new MediaStream();
     }
   }
 
-  // ── Mode: Camera (default) ────────────────────────────────────────────────
-  // Try camera first; if it's busy fall back to screen share; if denied join without media.
+  // ── Camera mode (default) ──────────────────────────────────────────────────
+  // Attempt 1: real camera + mic
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     localVideo.srcObject = stream;
@@ -142,19 +141,18 @@ async function getLocalMedia() {
     showToast('📷 Camera ready');
     return stream;
   } catch (camErr) {
-    console.warn('[media] Camera failed:', camErr.name, camErr.message);
+    console.warn('[media] camera error:', camErr.name);
 
+    // Denied by user → join silently, no blocking
     if (camErr.name === 'NotAllowedError') {
-      // User denied — join without any media
       showToast('Camera denied — joining without video');
-      setStatus('No camera — audio only or silent', 'waiting');
+      setStatus('No camera access — joining anyway', 'waiting');
       return new MediaStream();
     }
 
+    // Camera busy (another tab) → try screen share as fallback
     if (['NotReadableError', 'AbortError', 'TrackStartError'].includes(camErr.name)) {
-      // Camera busy (other tab) — try screen share
       showToast('Camera busy — trying screen share…');
-      setStatus('Camera busy — requesting screen…', 'waiting');
       try {
         const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         localVideo.srcObject = screen;
@@ -162,41 +160,54 @@ async function getLocalMedia() {
         showToast('🖥️ Using screen share instead');
         return screen;
       } catch {
-        showToast('Screen share cancelled — joining without video');
+        showToast('Screen cancelled — joining without video');
         return new MediaStream();
       }
     }
 
-    // Unknown error — join without media anyway so the call still works
-    showToast(`Media error (${camErr.name}) — joining without video`);
+    // Any other error → still join the call
+    showToast(`Media error — joining without video`);
     return new MediaStream();
   }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SOCKET.IO — signaling
+   SOCKET.IO — connect to Render signaling server
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function connectSocket() {
   if (socket && socket.connected) return;
 
-  // Connect to the signaling server
-  socket = SIGNAL_SERVER ? io(SIGNAL_SERVER) : io();
+  setStatus('Connecting to server…', 'waiting');
+
+  socket = io(SIGNAL_SERVER, {
+    transports: ['websocket', 'polling'],   // try WS first, fall back to polling
+    reconnectionAttempts: 5,
+  });
 
   socket.on('connect', () => {
     console.log('[socket] connected', socket.id);
     setBadge(true);
+    setStatus('Connected to server', 'idle');
+  });
+
+  socket.on('connect_error', (err) => {
+    console.error('[socket] connect error', err.message);
+    setStatus('Server unreachable — is Render awake?', 'error');
+    showToast('⚠️ Cannot reach server — it may be waking up, try again in 30s');
+    enableButtons();
   });
 
   socket.on('disconnect', () => {
-    console.log('[socket] disconnected');
     setBadge(false);
-    setStatus('Disconnected from server', 'error');
+    setStatus('Disconnected', 'error');
   });
 
-  // First user receives this when second joins → creates & sends offer
+  // ── Signaling events ───────────────────────────────────────────────────────
+
+  // First user gets this when second joins → creates offer
   socket.on('user-connected', async (peerId) => {
-    console.log('[signal] user-connected', peerId);
+    console.log('[signal] peer joined:', peerId);
     setStatus('Peer joined — connecting…', 'waiting');
     await createPeerConnection();
     await sendOffer();
@@ -210,7 +221,7 @@ function connectSocket() {
     const answer = await peerConn.createAnswer();
     await peerConn.setLocalDescription(answer);
     socket.emit('answer', { roomId: currentRoomId, answer });
-    setStatus('Answering…', 'waiting');
+    setStatus('Answering call…', 'waiting');
   });
 
   // First user receives answer
@@ -219,26 +230,27 @@ function connectSocket() {
     await peerConn.setRemoteDescription(new RTCSessionDescription(answer));
   });
 
-  // ICE candidates
+  // Both sides exchange ICE candidates
   socket.on('ice-candidate', async ({ candidate }) => {
     if (!peerConn || !candidate) return;
     try { await peerConn.addIceCandidate(new RTCIceCandidate(candidate)); }
-    catch (e) { console.warn('[ICE] add failed', e); }
+    catch (e) { console.warn('[ICE] failed to add:', e); }
   });
 
-  // Remote peer left
+  // Peer left
   socket.on('user-disconnected', () => {
     showToast('Peer left the call');
     setStatus('Peer disconnected', 'idle');
     deactivateVideo(remoteVideo, remotePlaceholder);
     closePeerConnection();
     callControls.style.display = 'none';
+    enableButtons();
   });
 
-  // Room full
+  // Room is full
   socket.on('room-full', (id) => {
-    setStatus(`Room "${id}" is full`, 'error');
-    showToast('Room is full (max 2 people)');
+    setStatus(`Room "${id}" is full (max 2)`, 'error');
+    showToast('Room is full!');
     enableButtons();
   });
 }
@@ -252,9 +264,9 @@ function joinRoom(roomId) {
       roomIdInput.value = roomId;
       copyBtn.style.display = 'flex';
       setStatus('Waiting for peer — share the Room ID', 'waiting');
-      showToast(`Room ready: ${roomId}`);
+      showToast(`Room: ${roomId}`);
     } else {
-      setStatus('Joining room — establishing connection…', 'waiting');
+      setStatus('Joining — establishing P2P connection…', 'waiting');
     }
     callControls.style.display = 'flex';
   });
@@ -266,9 +278,10 @@ function joinRoom(roomId) {
 
 async function createPeerConnection() {
   closePeerConnection();
+
   peerConn = new RTCPeerConnection(RTC_CONFIG);
 
-  // Add tracks (even if stream is empty — WebRTC handles it gracefully)
+  // Add tracks (empty stream is fine — WebRTC handles it gracefully)
   if (localStream) {
     localStream.getTracks().forEach(track => peerConn.addTrack(track, localStream));
   }
@@ -280,12 +293,13 @@ async function createPeerConnection() {
   peerConn.oniceconnectionstatechange = () => {
     const s = peerConn.iceConnectionState;
     console.log('[ICE]', s);
-    if (s === 'checking')                 setStatus('Checking…', 'waiting');
-    if (s === 'connected' || s === 'completed') setStatus('Connected ✓', 'active');
-    if (s === 'disconnected')             setStatus('Peer disconnected', 'idle');
-    if (s === 'failed')                   setStatus('Connection failed — try again', 'error');
+    if (s === 'checking')                      setStatus('Checking connection…', 'waiting');
+    if (s === 'connected' || s === 'completed') setStatus('Connected ✓  Live', 'active');
+    if (s === 'disconnected')                  setStatus('Peer disconnected', 'idle');
+    if (s === 'failed')                        setStatus('Connection failed — try again', 'error');
   };
 
+  // Remote stream arrives
   peerConn.ontrack = ({ streams }) => {
     console.log('[RTC] remote track received');
     if (streams?.[0]) {
@@ -300,6 +314,7 @@ async function sendOffer() {
   const offer = await peerConn.createOffer();
   await peerConn.setLocalDescription(offer);
   socket.emit('offer', { roomId: currentRoomId, offer });
+  console.log('[RTC] offer sent');
 }
 
 function closePeerConnection() {
@@ -329,15 +344,15 @@ videoBtn.addEventListener('click', () => {
 });
 
 hangupBtn.addEventListener('click', () => {
-  // Stop all tracks
   if (localStream) localStream.getTracks().forEach(t => t.stop());
-  deactivateVideo(localVideo, localPlaceholder);
+  deactivateVideo(localVideo,  localPlaceholder);
   deactivateVideo(remoteVideo, remotePlaceholder);
   closePeerConnection();
-  if (socket) socket.disconnect();
-  socket = null;
-  localStream = null;
+  if (socket) { socket.disconnect(); socket = null; }
+  localStream   = null;
   currentRoomId = null;
+  isMuted       = false;
+  isVideoOff    = false;
   callControls.style.display = 'none';
   copyBtn.style.display = 'none';
   roomIdInput.value = '';
@@ -348,37 +363,26 @@ hangupBtn.addEventListener('click', () => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BUTTON HANDLERS
+   BUTTON HANDLERS — Create & Join
    ═══════════════════════════════════════════════════════════════════════════ */
-
-function disableButtons() {
-  createBtn.disabled = true;
-  joinBtn.disabled   = true;
-}
-function enableButtons() {
-  createBtn.disabled = false;
-  joinBtn.disabled   = false;
-}
 
 createBtn.addEventListener('click', async () => {
   disableButtons();
   setStatus('Setting up media…', 'waiting');
 
-  try {
-    localStream = await getLocalMedia();
-  } catch (err) {
-    console.error(err);
-    setStatus('Media setup failed', 'error');
-    enableButtons();
-    return;
-  }
+  localStream = await getLocalMedia();   // never throws — always returns a stream
 
   const roomId = roomIdInput.value.trim() || generateRoomId();
   roomIdInput.value = roomId;
   copyBtn.style.display = 'flex';
 
   connectSocket();
-  joinRoom(roomId);
+  // Wait for socket to connect before joining the room
+  if (socket.connected) {
+    joinRoom(roomId);
+  } else {
+    socket.once('connect', () => joinRoom(roomId));
+  }
 });
 
 joinBtn.addEventListener('click', async () => {
@@ -388,20 +392,17 @@ joinBtn.addEventListener('click', async () => {
   disableButtons();
   setStatus('Setting up media…', 'waiting');
 
-  try {
-    localStream = await getLocalMedia();
-  } catch (err) {
-    console.error(err);
-    setStatus('Media setup failed', 'error');
-    enableButtons();
-    return;
-  }
+  localStream = await getLocalMedia();   // never throws
 
   connectSocket();
-  joinRoom(roomId);
+  if (socket.connected) {
+    joinRoom(roomId);
+  } else {
+    socket.once('connect', () => joinRoom(roomId));
+  }
 });
 
-/* ── Copy ────────────────────────────────────────────────────────────────── */
+/* ── Copy room ID ─────────────────────────────────────────────────────────── */
 copyBtn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(roomIdInput.value.trim());
@@ -411,12 +412,12 @@ copyBtn.addEventListener('click', async () => {
   }
 });
 
-/* ── Enter key ───────────────────────────────────────────────────────────── */
+/* ── Enter key to join ────────────────────────────────────────────────────── */
 roomIdInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinBtn.click(); });
 
-/* ── Cleanup on close ────────────────────────────────────────────────────── */
+/* ── Cleanup on tab close ─────────────────────────────────────────────────── */
 window.addEventListener('beforeunload', () => {
   if (localStream) localStream.getTracks().forEach(t => t.stop());
-  if (socket) socket.disconnect();
+  if (socket)      socket.disconnect();
   closePeerConnection();
 });
