@@ -1,1 +1,1 @@
-A video call system using node js
+A video call web application using node js
